@@ -146,10 +146,10 @@ async function main() {
   const app = express();
 
   app.use(cors({
-    origin: true, // allow all origins — MCP clients connect from various hosts
+    origin: '*', // wildcard — required for mcp-remote and Claude Desktop/Code clients
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'mcp-session-id', 'x-ghl-access-token', 'x-ghl-location-id'],
-    credentials: true,
+    // credentials: true omitted — browsers reject credentials:true with origin:'*'
   }));
 
   app.use(express.json());

@@ -54,15 +54,19 @@ async function main() {
     accessToken: process.env.GHL_API_KEY || '',
     baseUrl: process.env.GHL_BASE_URL || 'https://services.leadconnectorhq.com',
     version: '2021-07-28',
-    locationId: process.env.GHL_LOCATION_ID || '',
+    locationId: process.env.GHL_LOCATION_ID || '',  // empty = agency-level mode
+    companyId: process.env.GHL_COMPANY_ID || undefined,
   };
 
   if (!config.accessToken) throw new Error('GHL_API_KEY is required');
-  if (!config.locationId) throw new Error('GHL_LOCATION_ID is required');
+  // GHL_LOCATION_ID is optional when using an agency-level API key.
+  // Location-scoped tools will require locationId passed per-call in that case.
 
   log('info', 'Initializing GHL API client', {
     baseUrl: config.baseUrl,
-    locationId: config.locationId,
+    mode: config.locationId ? 'location' : 'agency',
+    locationId: config.locationId || '(agency-level)',
+    companyId: config.companyId || '(not set)',
   });
 
   const ghlClient = new EnhancedGHLClient(config);

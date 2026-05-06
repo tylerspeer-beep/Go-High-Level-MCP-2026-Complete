@@ -391,6 +391,17 @@ export class GHLApiClient {
   private axiosInstance: AxiosInstance;
   private config: GHLConfig;
 
+  /**
+   * Returns { locationId } only when a locationId is configured.
+   * Spread this into request bodies so agency-level calls omit the key entirely
+   * rather than sending an empty string (which GHL rejects).
+   * Usage: { ...this.loc(), ...otherFields }
+   */
+  protected loc(override?: string): { locationId: string } | Record<string, never> {
+    const id = override || this.config.locationId;
+    return id ? { locationId: id } : {};
+  }
+
   constructor(config: GHLConfig) {
     this.config = config;
     
@@ -481,7 +492,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...contactData,
-        locationId: contactData.locationId || this.config.locationId
+        ...this.loc(contactData.locationId),
       };
 
       const response: AxiosResponse<{ contact: GHLContact }> = await this.axiosInstance.post(
@@ -553,7 +564,7 @@ export class GHLApiClient {
       // Build minimal request body with only required/supported parameters
       // Start with just locationId and pageLimit as per API requirements
       const payload: any = {
-        locationId: searchParams.locationId || this.config.locationId,
+        ...this.loc(searchParams.locationId),
         pageLimit: searchParams.limit || 25
       };
 
@@ -705,7 +716,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const params = {
         ...searchParams,
-        locationId: searchParams.locationId || this.config.locationId
+        ...this.loc(searchParams.locationId),
       };
 
       const response: AxiosResponse<GHLSearchConversationsResponse> = await this.axiosInstance.get(
@@ -748,7 +759,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...conversationData,
-        locationId: conversationData.locationId || this.config.locationId
+        ...this.loc(conversationData.locationId),
       };
 
       const response: AxiosResponse<{ success: boolean; conversation: GHLCreateConversationResponse }> = await this.axiosInstance.post(
@@ -772,7 +783,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...updates,
-        locationId: updates.locationId || this.config.locationId
+        ...this.loc(updates.locationId),
       };
 
       const response: AxiosResponse<{ success: boolean; conversation: GHLConversation }> = await this.axiosInstance.put(
@@ -935,7 +946,7 @@ export class GHLApiClient {
     try {
       // Ensure locationId is set
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         skip: params.skip,
         limit: params.limit,
         ...(params.searchTerm && { searchTerm: params.searchTerm })
@@ -960,7 +971,7 @@ export class GHLApiClient {
     try {
       // Ensure locationId is set
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         blogId: params.blogId,
         limit: params.limit,
         offset: params.offset,
@@ -988,7 +999,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...postData,
-        locationId: postData.locationId || this.config.locationId
+        ...this.loc(postData.locationId),
       };
 
       const response: AxiosResponse<GHLBlogPostCreateResponse> = await this.axiosInstance.post(
@@ -1011,7 +1022,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...postData,
-        locationId: postData.locationId || this.config.locationId
+        ...this.loc(postData.locationId),
       };
 
       const response: AxiosResponse<GHLBlogPostUpdateResponse> = await this.axiosInstance.put(
@@ -1033,7 +1044,7 @@ export class GHLApiClient {
     try {
       // Ensure locationId is set
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         limit: params.limit,
         offset: params.offset
       };
@@ -1057,7 +1068,7 @@ export class GHLApiClient {
     try {
       // Ensure locationId is set
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         limit: params.limit,
         offset: params.offset
       };
@@ -1081,7 +1092,7 @@ export class GHLApiClient {
     try {
       // Ensure locationId is set
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         urlSlug: params.urlSlug,
         ...(params.postId && { postId: params.postId })
       };
@@ -1298,7 +1309,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...contactData,
-        locationId: contactData.locationId || this.config.locationId
+        ...this.loc(contactData.locationId),
       };
 
       const response: AxiosResponse<GHLUpsertContactResponse> = await this.axiosInstance.post(
@@ -1526,17 +1537,21 @@ export class GHLApiClient {
    */
 
   /**
-   * Test API connection and authentication
+   * Test API connection and authentication.
+   * Uses the agency-level /locations/search endpoint when no locationId is
+   * configured (agency token mode), or /locations/:id for location tokens.
    */
   async testConnection(): Promise<GHLApiResponse<{ status: string; locationId: string }>> {
     try {
-      // Test with a simple GET request to check API connectivity
-      const response: AxiosResponse<any> = await this.axiosInstance.get('/locations/' + this.config.locationId);
-
-      return this.wrapResponse({
-        status: 'connected',
-        locationId: this.config.locationId
-      });
+      if (this.config.locationId) {
+        // Location-scoped token: verify access to the specific location
+        await this.axiosInstance.get('/locations/' + this.config.locationId);
+        return this.wrapResponse({ status: 'connected', locationId: this.config.locationId });
+      } else {
+        // Agency-level token: use /locations/search (agency endpoint, no locationId needed)
+        await this.axiosInstance.get('/locations/search?limit=1');
+        return this.wrapResponse({ status: 'connected', locationId: 'agency-level' });
+      }
     } catch (error) {
       throw new Error(`GHL API connection test failed: ${error}`);
     }
@@ -1600,7 +1615,7 @@ export class GHLApiClient {
     try {
       // Build query parameters with exact API naming (underscores)
       const params: any = {
-        location_id: searchParams.location_id || this.config.locationId
+        ...((searchParams.location_id || this.config.locationId) ? { location_id: searchParams.location_id || this.config.locationId } : {}),
       };
 
       // Add optional search parameters only if they have values
@@ -1747,7 +1762,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...opportunityData,
-        locationId: opportunityData.locationId || this.config.locationId
+        ...this.loc(opportunityData.locationId),
       };
 
       const response: AxiosResponse<{ opportunity: GHLOpportunity }> = await this.axiosInstance.post(
@@ -1806,7 +1821,7 @@ export class GHLApiClient {
       // Ensure locationId is set
       const payload = {
         ...opportunityData,
-        locationId: opportunityData.locationId || this.config.locationId
+        ...this.loc(opportunityData.locationId),
       };
 
       const response: AxiosResponse<GHLUpsertOpportunityResponse> = await this.axiosInstance.post(
@@ -1907,7 +1922,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...groupData,
-        locationId: groupData.locationId || this.config.locationId
+        ...this.loc(groupData.locationId),
       };
 
       const response: AxiosResponse<{ group: GHLCalendarGroup }> = await this.axiosInstance.post(
@@ -1952,7 +1967,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...calendarData,
-        locationId: calendarData.locationId || this.config.locationId
+        ...this.loc(calendarData.locationId),
       };
 
       const response: AxiosResponse<{ calendar: GHLCalendar }> = await this.axiosInstance.post(
@@ -2022,7 +2037,7 @@ export class GHLApiClient {
   async getCalendarEvents(eventParams: GHLGetCalendarEventsRequest): Promise<GHLApiResponse<GHLGetCalendarEventsResponse>> {
     try {
       const params = {
-        locationId: eventParams.locationId || this.config.locationId,
+        ...this.loc(eventParams.locationId),
         startTime: eventParams.startTime,
         endTime: eventParams.endTime,
         ...(eventParams.userId && { userId: eventParams.userId }),
@@ -2048,7 +2063,7 @@ export class GHLApiClient {
   async getBlockedSlots(eventParams: GHLGetCalendarEventsRequest): Promise<GHLApiResponse<GHLGetCalendarEventsResponse>> {
     try {
       const params = {
-        locationId: eventParams.locationId || this.config.locationId,
+        ...this.loc(eventParams.locationId),
         startTime: eventParams.startTime,
         endTime: eventParams.endTime,
         ...(eventParams.userId && { userId: eventParams.userId }),
@@ -2101,7 +2116,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...appointmentData,
-        locationId: appointmentData.locationId || this.config.locationId
+        ...this.loc(appointmentData.locationId),
       };
 
       const response: AxiosResponse<GHLCalendarEvent> = await this.axiosInstance.post(
@@ -2191,7 +2206,7 @@ export class GHLApiClient {
     try {
       const response: AxiosResponse<GHLEmailCampaignsResponse> = await this.axiosInstance.get('/emails/schedule', {
         params: {
-          locationId: this.config.locationId,
+          ...this.loc(),
           ...params
         }
       });
@@ -2204,7 +2219,7 @@ export class GHLApiClient {
   async createEmailTemplate(params: MCPCreateEmailTemplateParams): Promise<GHLApiResponse<any>> {
     try {
       const response: AxiosResponse<any> = await this.axiosInstance.post('/emails/builder', {
-        locationId: this.config.locationId,
+        ...this.loc(),
         type: 'html',
         ...params
       });
@@ -2218,7 +2233,7 @@ export class GHLApiClient {
     try {
       const response: AxiosResponse<GHLEmailTemplate[]> = await this.axiosInstance.get('/emails/builder', {
         params: {
-          locationId: this.config.locationId,
+          ...this.loc(),
           ...params
         }
       });
@@ -2232,7 +2247,7 @@ export class GHLApiClient {
     try {
       const { templateId, ...data } = params;
       const response: AxiosResponse<any> = await this.axiosInstance.post('/emails/builder/data', {
-        locationId: this.config.locationId,
+        ...this.loc(),
         templateId,
         ...data,
         editorType: 'html'
@@ -3489,7 +3504,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...resourceData,
-        locationId: resourceData.locationId || this.config.locationId
+        ...this.loc(resourceData.locationId),
       };
 
       const response: AxiosResponse<GHLCalendarResourceResponse> = await this.axiosInstance.post(
@@ -3676,7 +3691,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...blockSlotData,
-        locationId: blockSlotData.locationId || this.config.locationId
+        ...this.loc(blockSlotData.locationId),
       };
 
       const response: AxiosResponse<GHLBlockSlotResponse> = await this.axiosInstance.post(
@@ -3815,7 +3830,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...schemaData,
-        locationId: schemaData.locationId || this.config.locationId
+        ...this.loc(schemaData.locationId),
       };
 
       const response: AxiosResponse<GHLObjectSchemaResponse> = await this.axiosInstance.post(
@@ -3836,7 +3851,7 @@ export class GHLApiClient {
   async getObjectSchema(params: GHLGetObjectSchemaRequest): Promise<GHLApiResponse<GHLGetObjectSchemaResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         ...(params.fetchProperties !== undefined && { fetchProperties: params.fetchProperties.toString() })
       };
 
@@ -3859,7 +3874,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...updateData,
-        locationId: updateData.locationId || this.config.locationId
+        ...this.loc(updateData.locationId),
       };
 
       const response: AxiosResponse<GHLObjectSchemaResponse> = await this.axiosInstance.put(
@@ -3881,7 +3896,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...recordData,
-        locationId: recordData.locationId || this.config.locationId
+        ...this.loc(recordData.locationId),
       };
 
       const response: AxiosResponse<GHLDetailedObjectRecordResponse> = await this.axiosInstance.post(
@@ -3918,7 +3933,7 @@ export class GHLApiClient {
   async updateObjectRecord(schemaKey: string, recordId: string, updateData: GHLUpdateObjectRecordRequest): Promise<GHLApiResponse<GHLObjectRecordResponse>> {
     try {
       const queryParams = {
-        locationId: updateData.locationId || this.config.locationId
+        ...this.loc(updateData.locationId),
       };
 
       const response: AxiosResponse<GHLObjectRecordResponse> = await this.axiosInstance.put(
@@ -3957,7 +3972,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...searchData,
-        locationId: searchData.locationId || this.config.locationId
+        ...this.loc(searchData.locationId),
       };
 
       const response: AxiosResponse<GHLSearchObjectRecordsResponse> = await this.axiosInstance.post(
@@ -3980,7 +3995,7 @@ export class GHLApiClient {
   async getAssociations(params: GHLGetAssociationsRequest): Promise<GHLApiResponse<GHLGetAssociationsResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         skip: params.skip.toString(),
         limit: params.limit.toString()
       };
@@ -4004,7 +4019,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...associationData,
-        locationId: associationData.locationId || this.config.locationId
+        ...this.loc(associationData.locationId),
       };
 
       const response: AxiosResponse<GHLAssociationResponse> = await this.axiosInstance.post(
@@ -4074,7 +4089,7 @@ export class GHLApiClient {
   async getAssociationByKey(params: GHLGetAssociationByKeyRequest): Promise<GHLApiResponse<GHLAssociationResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId
+        ...this.loc(params.locationId),
       };
 
       const response: AxiosResponse<GHLAssociationResponse> = await this.axiosInstance.get(
@@ -4117,7 +4132,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...relationData,
-        locationId: relationData.locationId || this.config.locationId
+        ...this.loc(relationData.locationId),
       };
 
       const response: AxiosResponse<GHLAssociationResponse> = await this.axiosInstance.post(
@@ -4138,7 +4153,7 @@ export class GHLApiClient {
   async getRelationsByRecord(params: GHLGetRelationsByRecordRequest): Promise<GHLApiResponse<GHLGetRelationsResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId,
+        ...this.loc(params.locationId),
         skip: params.skip.toString(),
         limit: params.limit.toString(),
         ...(params.associationIds && { associationIds: params.associationIds })
@@ -4162,7 +4177,7 @@ export class GHLApiClient {
   async deleteRelation(params: GHLDeleteRelationRequest): Promise<GHLApiResponse<GHLAssociationResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId
+        ...this.loc(params.locationId),
       };
 
       const response: AxiosResponse<GHLAssociationResponse> = await this.axiosInstance.delete(
@@ -4202,7 +4217,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...fieldData,
-        locationId: fieldData.locationId || this.config.locationId
+        ...this.loc(fieldData.locationId),
       };
 
       const response: AxiosResponse<GHLV2CustomFieldResponse> = await this.axiosInstance.post(
@@ -4224,7 +4239,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...fieldData,
-        locationId: fieldData.locationId || this.config.locationId
+        ...this.loc(fieldData.locationId),
       };
 
       const response: AxiosResponse<GHLV2CustomFieldResponse> = await this.axiosInstance.put(
@@ -4261,7 +4276,7 @@ export class GHLApiClient {
   async getCustomFieldsV2ByObjectKey(params: GHLV2GetCustomFieldsByObjectKeyRequest): Promise<GHLApiResponse<GHLV2CustomFieldsResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId
+        ...this.loc(params.locationId),
       };
 
       const response: AxiosResponse<GHLV2CustomFieldsResponse> = await this.axiosInstance.get(
@@ -4283,7 +4298,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...folderData,
-        locationId: folderData.locationId || this.config.locationId
+        ...this.loc(folderData.locationId),
       };
 
       const response: AxiosResponse<GHLV2CustomFieldFolderResponse> = await this.axiosInstance.post(
@@ -4305,7 +4320,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...folderData,
-        locationId: folderData.locationId || this.config.locationId
+        ...this.loc(folderData.locationId),
       };
 
       const response: AxiosResponse<GHLV2CustomFieldFolderResponse> = await this.axiosInstance.put(
@@ -4326,7 +4341,7 @@ export class GHLApiClient {
   async deleteCustomFieldV2Folder(params: GHLV2DeleteCustomFieldFolderRequest): Promise<GHLApiResponse<GHLV2DeleteCustomFieldResponse>> {
     try {
       const queryParams = {
-        locationId: params.locationId || this.config.locationId
+        ...this.loc(params.locationId),
       };
 
       const response: AxiosResponse<GHLV2DeleteCustomFieldResponse> = await this.axiosInstance.delete(
@@ -4349,7 +4364,7 @@ export class GHLApiClient {
   async getWorkflows(request: GHLGetWorkflowsRequest): Promise<GHLApiResponse<GHLGetWorkflowsResponse>> {
     try {
       const queryParams = {
-        locationId: request.locationId || this.config.locationId
+        ...this.loc(request.locationId),
       };
 
       const response: AxiosResponse<GHLGetWorkflowsResponse> = await this.axiosInstance.get(
@@ -4372,7 +4387,7 @@ export class GHLApiClient {
   async getSurveys(request: GHLGetSurveysRequest): Promise<GHLApiResponse<GHLGetSurveysResponse>> {
     try {
       const queryParams: Record<string, string> = {
-        locationId: request.locationId || this.config.locationId
+        ...this.loc(request.locationId),
       };
 
       if (request.skip !== undefined) {
@@ -4918,7 +4933,7 @@ export class GHLApiClient {
   async listProducts(params: GHLListProductsRequest): Promise<GHLApiResponse<GHLListProductsResponse>> {
     try {
       const queryParams = new URLSearchParams({
-        locationId: params.locationId || this.config.locationId
+        ...this.loc(params.locationId),
       });
 
       if (params.limit) queryParams.append('limit', params.limit.toString());
@@ -4994,7 +5009,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...priceData,
-        locationId: priceData.locationId || this.config.locationId
+        ...this.loc(priceData.locationId),
       };
 
       const response: AxiosResponse<GHLCreatePriceResponse> = await this.axiosInstance.post(
@@ -5016,7 +5031,7 @@ export class GHLApiClient {
     try {
       const payload = {
         ...updateData,
-        locationId: updateData.locationId || this.config.locationId
+        ...this.loc(updateData.locationId),
       };
 
       const response: AxiosResponse<GHLUpdatePriceResponse> = await this.axiosInstance.put(
@@ -5057,7 +5072,7 @@ export class GHLApiClient {
   async listPrices(productId: string, params: GHLListPricesRequest): Promise<GHLApiResponse<GHLListPricesResponse>> {
     try {
       const queryParams = new URLSearchParams({
-        locationId: params.locationId || this.config.locationId
+        ...this.loc(params.locationId),
       });
 
       if (params.limit) queryParams.append('limit', params.limit.toString());

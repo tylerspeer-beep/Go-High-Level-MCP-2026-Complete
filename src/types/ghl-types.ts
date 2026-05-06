@@ -8,7 +8,8 @@ export interface GHLConfig {
   accessToken: string;
   baseUrl: string;
   version: string;
-  locationId: string;
+  locationId: string;   // empty string = agency-level token (no location scope)
+  companyId?: string;   // agency/company ID for agency-level operations
 }
 
 // OAuth Token Response
